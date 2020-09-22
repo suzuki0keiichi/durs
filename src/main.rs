@@ -64,7 +64,9 @@ fn calc(dir: String, depth: i32, threshold: u64, human_readable: bool) -> u64 {
 }
 
 fn format(size: u64, human_readable: bool) -> String {
-    if !human_readable || size < 1000 {
+    if !human_readable {
+        format!("{: >12}", size)
+    } else if size < 1000 {
         format!("{}", size)
     } else if size < 1000000 {
         format!("{}k", size / 1000)
