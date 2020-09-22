@@ -64,7 +64,7 @@ fn main() {
     match parse_args(env::args().collect()) {
         Ok((paths, options)) => {
             for path in paths.iter() {
-                calc(path, 0, &options);
+                display_dir(path, 0, &options);
             }
         }
         Err(err) => {
@@ -73,8 +73,7 @@ fn main() {
     };
 }
 
-/// calcだけど表示もしてしまっている、、メモリ無視なら結果は別で保存したほうが良いか？
-fn calc(dir_name: &String, depth: i32, options: &Options) -> u64 {
+fn display_dir(dir_name: &String, depth: i32, options: &Options) -> u64 {
     let mut total: u64 = 0;
 
     let dir = fs::read_dir(format!("{}", dir_name));
@@ -87,21 +86,21 @@ fn calc(dir_name: &String, depth: i32, options: &Options) -> u64 {
         let entry = entry.unwrap();
 
         if entry.file_type().unwrap().is_dir() {
-            total += calc(&format!("{}/{}", dir_name, entry.file_name().to_str().unwrap()), depth + 1, options);
+            total += display_dir(&format!("{}/{}", dir_name, entry.file_name().to_str().unwrap()), depth + 1, options);
         } else {
             let len = entry.metadata().unwrap().len();
 
             total += len;
-            display(&format!("{}/{}", *dir_name, entry.file_name().to_str().unwrap()), len, depth + 1, options);
+            display_path(&format!("{}/{}", *dir_name, entry.file_name().to_str().unwrap()), len, depth + 1, options);
         }
     }
 
-    display(dir_name, total, depth, options);
+    display_path(dir_name, total, depth, options);
 
     total
 }
 
-fn display(name: &String, size: u64, depth: i32, options: &Options) {
+fn display_path(name: &String, size: u64, depth: i32, options: &Options) {
     if options.max_depth - depth >= 0 && size > options.threshold {
         println!("{} {}", format(size, options.human_readable), name);
     }
