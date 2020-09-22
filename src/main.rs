@@ -29,46 +29,52 @@ fn parse_int_arg(prefixes: &[&str], arg: &String) -> Result<Option<u64>, String>
     Ok(None)
 }
 
-fn parse_options(args: Vec<String>) -> Result<Options, String> {
+fn parse_args(args: Vec<String>) -> Result<(Vec<String>, Options), String> {
     let mut max_depth: Option<i32> = None;
     let mut threshold: Option<u64> = None;
     let mut human_readable: Option<bool> = None;
+    let mut paths: Vec<String> = Vec::new();
 
-    for arg in args.iter() {
+    for arg in args.iter().skip(1) {
         if let Some(num) = parse_int_arg(&["-d", "--max-depth="], &arg)? {
             max_depth = Some(num as i32);
-        }
-
-        if let Some(num) = parse_int_arg(&["-t", "--threshold="], &arg)? {
+        } else if let Some(num) = parse_int_arg(&["-t", "--threshold="], &arg)? {
             threshold = Some(num);
-        }
-
-        if arg == "-h" || arg == "--human-readable" {
+        } else if arg == "-h" || arg == "--human-readable" {
             human_readable = Some(true);
+        } else if arg.starts_with("-") {
+            println!("unknown option {}", arg);
+        } else {
+            paths.push(arg.clone());
         }
     }
 
-    Ok(Options {
+    if paths.is_empty() {
+        paths.push(".".into());
+    }
+
+    Ok((paths, Options {
         max_depth: max_depth.unwrap_or(3),
         human_readable: human_readable.unwrap_or(false),
         threshold: threshold.unwrap_or(0),
-    })
+    }))
 }
 
 fn main() {
-    match parse_options(env::args().collect()) {
-        Ok(options) => {
-            calc(String::from("."), 0, &options)
+    match parse_args(env::args().collect()) {
+        Ok((paths, options)) => {
+            for path in paths.iter() {
+                calc(path, 0, &options);
+            }
         }
         Err(err) => {
             println!("option parse failed. {}", err);
-            0 // matchで型を揃えないと死んでもコンパイルしないみたいなことになってるから仕方なくやっているが不毛に思う
         }
     };
 }
 
 /// calcだけど表示もしてしまっている、、メモリ無視なら結果は別で保存したほうが良いか？
-fn calc(dir_name: String, depth: i32, options: &Options) -> u64 {
+fn calc(dir_name: &String, depth: i32, options: &Options) -> u64 {
     let mut total: u64 = 0;
 
     let dir = fs::read_dir(format!("{}", dir_name));
@@ -81,12 +87,12 @@ fn calc(dir_name: String, depth: i32, options: &Options) -> u64 {
         let entry = entry.unwrap();
 
         if entry.file_type().unwrap().is_dir() {
-            total += calc(format!("{}/{}", dir_name, entry.file_name().to_str().unwrap()), depth + 1, options);
+            total += calc(&format!("{}/{}", dir_name, entry.file_name().to_str().unwrap()), depth + 1, options);
         } else {
             let len = entry.metadata().unwrap().len();
 
             total += len;
-            display(format!("{}/{}", dir_name, entry.file_name().to_str().unwrap()), len, depth + 1, options);
+            display(&format!("{}/{}", *dir_name, entry.file_name().to_str().unwrap()), len, depth + 1, options);
         }
     }
 
@@ -95,7 +101,7 @@ fn calc(dir_name: String, depth: i32, options: &Options) -> u64 {
     total
 }
 
-fn display(name: String, size: u64, depth: i32, options: &Options) {
+fn display(name: &String, size: u64, depth: i32, options: &Options) {
     if options.max_depth - depth >= 0 && size > options.threshold {
         println!("{} {}", format(size, options.human_readable), name);
     }
