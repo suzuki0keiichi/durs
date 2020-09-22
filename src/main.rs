@@ -1,80 +1,118 @@
 use std::env;
 use std::fs;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let mut depth: i32 = 3;
-    let mut threshold: u64 = 3;
-    let mut human_readable: bool = false;
+struct Options {
+    max_depth: i32,
+    threshold: u64,
+    human_readable: bool,
+}
+
+fn parse_int_arg(prefixes: &[&str], arg: &String) -> Result<Option<u64>, String> {
+    for prefix in prefixes.iter() {
+        if !arg.starts_with(prefix) {
+            continue;
+        }
+
+        let result = match arg.get(prefix.len()..arg.len()) {
+            Some(value) => {
+                match value.parse() {
+                    Ok(value) => Ok(Some(value)),
+                    Err(_) => Err(format!("{} is not number {}", arg, value)),
+                }
+            }
+            None => Err(format!("{} parameter not found", arg)),
+        };
+
+        return result;
+    }
+
+    Ok(None)
+}
+
+fn parse_options(args: Vec<String>) -> Result<Options, String> {
+    let mut max_depth: Option<i32> = None;
+    let mut threshold: Option<u64> = None;
+    let mut human_readable: Option<bool> = None;
 
     for arg in args.iter() {
-        if arg.starts_with("-d") {
-            depth = arg.get(2..arg.len()).unwrap().parse().unwrap();
+        if let Some(num) = parse_int_arg(&["-d", "--max-depth="], &arg)? {
+            max_depth = Some(num as i32);
         }
 
-        if arg.starts_with("--max-depth=") {
-            depth = arg.get(12..arg.len()).unwrap().parse().unwrap();
-        }
-
-        if arg.starts_with("-t") {
-            threshold = arg.get(2..arg.len()).unwrap().parse().unwrap();
-        }
-
-        if arg.starts_with("--threshold=") {
-            threshold = arg.get(12..arg.len()).unwrap().parse().unwrap();
+        if let Some(num) = parse_int_arg(&["-t", "--threshold="], &arg)? {
+            threshold = Some(num);
         }
 
         if arg == "-h" || arg == "--human-readable" {
-            human_readable = true;
+            human_readable = Some(true);
         }
     }
 
-    calc(String::from("."), depth, threshold, human_readable);
+    Ok(Options {
+        max_depth: max_depth.unwrap_or(3),
+        human_readable: human_readable.unwrap_or(false),
+        threshold: threshold.unwrap_or(0),
+    })
+}
+
+fn main() {
+    match parse_options(env::args().collect()) {
+        Ok(options) => {
+            calc(String::from("."), 0, &options)
+        }
+        Err(err) => {
+            println!("option parse failed. {}", err);
+            0 // matchで型を揃えないと死んでもコンパイルしないみたいなことになってるから仕方なくやっているが不毛に思う
+        }
+    };
 }
 
 /// calcだけど表示もしてしまっている、、メモリ無視なら結果は別で保存したほうが良いか？
-fn calc(dir: String, depth: i32, threshold: u64, human_readable: bool) -> u64 {
+fn calc(dir_name: String, depth: i32, options: &Options) -> u64 {
     let mut total: u64 = 0;
 
-    let readdir = fs::read_dir(format!("{}", dir));
-    if readdir.is_err() {
-        // println!("{} search error {}", dir, readdir.err().unwrap());
+    let dir = fs::read_dir(format!("{}", dir_name));
+    if dir.is_err() {
+        // println!("{} search error {}", dir, dir.err().unwrap());
         return 0;
     }
 
-    for entry in readdir.unwrap() {
+    for entry in dir.unwrap() {
         let entry = entry.unwrap();
 
         if entry.file_type().unwrap().is_dir() {
-            total += calc(format!("{}/{}", dir, entry.file_name().to_str().unwrap()), depth - 1, threshold, human_readable);
+            total += calc(format!("{}/{}", dir_name, entry.file_name().to_str().unwrap()), depth + 1, options);
         } else {
             let len = entry.metadata().unwrap().len();
+
             total += len;
-            if depth > 0 && len > threshold {
-                println!("{0: >5} {1:}", format(len, human_readable), format!("{}/{}", dir, entry.file_name().to_str().unwrap()));
-            }
+            display(format!("{}/{}", dir_name, entry.file_name().to_str().unwrap()), len, depth + 1, options);
         }
     }
 
-    if depth >= 0 && total > threshold {
-        println!("{0: >5} {1:}", format(total, human_readable), dir);
-    }
+    display(dir_name, total, depth, options);
 
     total
+}
+
+fn display(name: String, size: u64, depth: i32, options: &Options) {
+    if options.max_depth - depth >= 0 && size > options.threshold {
+        println!("{} {}", format(size, options.human_readable), name);
+    }
 }
 
 fn format(size: u64, human_readable: bool) -> String {
     if !human_readable {
         format!("{: >12}", size)
     } else if size < 1000 {
-        format!("{}", size)
+        format!("{: >5}", size)
     } else if size < 1000000 {
-        format!("{}k", size / 1000)
+        format!("{: >5}K", size / 1000)
     } else if size < 1000000000 {
-        format!("{}M", size / 1000000)
+        format!("{: >5}M", size / 1000000)
     } else if size < 1000000000000 {
-        format!("{}G", size / 1000000000)
+        format!("{: >5}G", size / 1000000000)
     } else {
-        format!("{}T", size / 1000000000000)
+        format!("{: >5}T", size / 1000000000000)
     }
 }
