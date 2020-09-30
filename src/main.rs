@@ -85,14 +85,16 @@ fn display_dir(dir_name: &String, depth: i32, options: &Options) -> u64 {
     for entry in dir.unwrap() {
         let entry = entry.unwrap();
 
-        if entry.file_type().unwrap().is_dir() {
-            total += display_dir(&format!("{}/{}", dir_name, entry.file_name().to_str().unwrap()), depth + 1, options);
-        } else {
-            let len = entry.metadata().unwrap().len();
+        entry.file_name().to_str().map(|file_name| {
+            if entry.file_type().unwrap().is_dir() {
+                total += display_dir(&format!("{}/{}", dir_name, file_name), depth + 1, options);
+            } else {
+                let len = entry.metadata().unwrap().len();
 
-            total += len;
-            display_path(&format!("{}/{}", *dir_name, entry.file_name().to_str().unwrap()), len, depth + 1, options);
-        }
+                total += len;
+                display_path(&format!("{}/{}", *dir_name, file_name), len, depth + 1, options);
+            }
+        });
     }
 
     display_path(dir_name, total, depth, options);
