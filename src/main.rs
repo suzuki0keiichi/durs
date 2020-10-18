@@ -112,7 +112,7 @@ fn format(size: u64, human_readable: bool) -> String {
     if !human_readable {
         format!("{: >12}", size)
     } else if size < 1000 {
-        format!("{: >5}", size)
+        format!("{: >6}", size)
     } else if size < 1000000 {
         format!("{: >5}K", size / 1000)
     } else if size < 1000000000 {
