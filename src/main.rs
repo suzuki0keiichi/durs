@@ -26,17 +26,17 @@ fn parse_args(args: Vec<String>) -> Result<(Vec<String>, Options), String> {
     let mut human_readable: bool = false;
     let mut paths: Vec<String> = Vec::new();
 
-    for arg in args.iter().skip(1) {
-        if let Some(num) = parse_int_arg(&["-d", "--max-depth="], arg)? {
+    for arg in args.into_iter().skip(1) {
+        if let Some(num) = parse_int_arg(&["-d", "--max-depth="], &arg)? {
             max_depth = Some(num as i32);
-        } else if let Some(num) = parse_int_arg(&["-t", "--threshold="], arg)? {
+        } else if let Some(num) = parse_int_arg(&["-t", "--threshold="], &arg)? {
             threshold = Some(num);
         } else if arg == "-h" || arg == "--human-readable" {
             human_readable = true;
         } else if arg.starts_with('-') {
-            return Err(format!("Unknown option: {}", arg));
+            return Err(format!("Unknown option: {arg}"));
         } else {
-            paths.push(arg.to_string());
+            paths.push(arg);
         }
     }
 
@@ -55,14 +55,17 @@ fn parse_args(args: Vec<String>) -> Result<(Vec<String>, Options), String> {
 }
 
 fn main() {
-    match parse_args(env::args().collect()) {
-        Ok((paths, options)) => {
-            for path in &paths {
-                let path_buf = PathBuf::from(path);
-                display_dir(&path_buf, 0, &options);
-            }
+    let result: Result<(), String> = (|| {
+        let (paths, options) = parse_args(env::args().collect())?;
+        for path in paths {
+            let path_buf = PathBuf::from(path);
+            display_dir(&path_buf, 0, &options);
         }
-        Err(err) => eprintln!("Failed to parse options: {}", err),
+        Ok(())
+    })();
+
+    if let Err(err) = result {
+        eprintln!("Failed to parse options: {err}");
     }
 }
 
@@ -72,16 +75,16 @@ fn display_dir(dir: &Path, depth: i32, options: &Options) -> u64 {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) => {
-            eprintln!("Failed to read {}: {}", dir.display(), e);
+            eprintln!("Failed to read {}: {e}", dir.display());
             return 0;
         }
     };
 
-    for entry in entries.filter_map(|e| e.ok()) {
+    for entry in entries.filter_map(Result::ok) {
         let file_type = match entry.file_type() {
             Ok(ft) => ft,
             Err(e) => {
-                eprintln!("Failed to get metadata for {}: {}", entry.path().display(), e);
+                eprintln!("Failed to get metadata for {}: {e}", entry.path().display());
                 continue;
             }
         };
@@ -93,7 +96,7 @@ fn display_dir(dir: &Path, depth: i32, options: &Options) -> u64 {
             let len = match entry.metadata() {
                 Ok(m) => m.len(),
                 Err(e) => {
-                    eprintln!("Failed to get metadata for {}: {}", path.display(), e);
+                    eprintln!("Failed to get metadata for {}: {e}", path.display());
                     continue;
                 }
             };
