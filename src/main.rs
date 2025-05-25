@@ -1,6 +1,10 @@
+use rayon::prelude::*;
 use std::env;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 struct Options {
     max_depth: i32,
@@ -57,10 +61,21 @@ fn parse_args(args: Vec<String>) -> Result<(Vec<String>, Options), String> {
 fn main() {
     let result: Result<(), String> = (|| {
         let (paths, options) = parse_args(env::args().collect())?;
+        
+        // 出力バッファを作成
+        let output_buffer = Mutex::new(Vec::new());
+        
         for path in paths {
             let path_buf = PathBuf::from(path);
-            display_dir(&path_buf, 0, &options);
+            display_dir(&path_buf, 0, &options, &output_buffer);
         }
+        
+        // バッファの内容を一度に出力
+        let buffer = output_buffer.lock().unwrap();
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
+        handle.write_all(&buffer).unwrap();
+        
         Ok(())
     })();
 
@@ -69,54 +84,68 @@ fn main() {
     }
 }
 
-fn display_dir(dir: &Path, depth: i32, options: &Options) -> u64 {
-    let mut total: u64 = 0;
+fn display_dir(dir: &Path, depth: i32, options: &Options, output_buffer: &Mutex<Vec<u8>>) -> u64 {
+    let total = AtomicU64::new(0);
 
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
+    let mut entries: Vec<_> = match fs::read_dir(dir) {
+        Ok(entries) => entries.filter_map(Result::ok).collect(),
         Err(e) => {
             eprintln!("Failed to read {}: {e}", dir.display());
             return 0;
         }
     };
 
-    for entry in entries.filter_map(Result::ok) {
+    // ディレクトリを先に処理するためにソート（メモリ効率向上）
+    entries.sort_by_key(|entry| {
+        entry.file_type()
+            .map(|ft| !ft.is_dir())
+            .unwrap_or(true)
+    });
+
+    // 並列処理でエントリを処理
+    entries.par_iter().for_each(|entry| {
         let file_type = match entry.file_type() {
             Ok(ft) => ft,
             Err(e) => {
-                eprintln!("Failed to get metadata for {}: {e}", entry.path().display());
-                continue;
+                eprintln!("Failed to get file type for {}: {e}", entry.path().display());
+                return;
             }
         };
 
         let path = entry.path();
         if file_type.is_dir() {
-            total += display_dir(&path, depth + 1, options);
+            let size = display_dir(&path, depth + 1, options, output_buffer);
+            total.fetch_add(size, Ordering::Relaxed);
         } else {
-            let len = match entry.metadata() {
-                Ok(m) => m.len(),
+            // ファイルの場合のみメタデータを取得
+            let metadata = match entry.metadata() {
+                Ok(m) => m,
                 Err(e) => {
                     eprintln!("Failed to get metadata for {}: {e}", path.display());
-                    continue;
+                    return;
                 }
             };
-
-            total += len;
-            display_path(&path, len, depth + 1, options);
+            let len = metadata.len();
+            total.fetch_add(len, Ordering::Relaxed);
+            display_path(&path, len, depth + 1, options, output_buffer);
         }
-    }
+    });
 
-    display_path(dir, total, depth, options);
-    total
+    let total_size = total.load(Ordering::Relaxed);
+    display_path(dir, total_size, depth, options, output_buffer);
+    total_size
 }
 
-fn display_path(path: &Path, size: u64, depth: i32, options: &Options) {
+fn display_path(path: &Path, size: u64, depth: i32, options: &Options, output_buffer: &Mutex<Vec<u8>>) {
     if options.max_depth - depth >= 0 && size > options.threshold {
-        println!(
-            "{} {}",
+        let output = format!(
+            "{} {}\n",
             format_size(size, options.human_readable),
             path.display()
         );
+        
+        let mut buffer = output_buffer.lock().unwrap();
+        buffer.extend_from_slice(output.as_bytes());
     }
 }
 
